@@ -87,7 +87,7 @@ def split_data(X, y, test_size=0.2, val_size=0.2, random_state=42):
 
 
 def _objective(trial, X_train, y_train, X_val, y_val, metric_func):
-    # 1️⃣ РЕГУЛЯРИЗАЦИЯ ПОИСКОВОГО ПРОСТРАНСТВА
+    # РЕГУЛЯРИЗАЦИЯ ПОИСКОВОГО ПРОСТРАНСТВА
     params = {
         "max_depth": trial.suggest_int("max_depth", 3, 8),
         "gamma": trial.suggest_float("gamma", 0.1, 2.0),
@@ -131,10 +131,6 @@ def optimize_xgb_optuna(
     metric_func=mean_squared_error,
     direction="minimize",
 ):
-    """
-    Запуск Optuna оптимизации для XGBoost.
-    Возвращает: best_params, best_value, best_n_estimators
-    """
     study = optuna.create_study(
         direction=direction,
         study_name="xgb_hyperopt",
@@ -151,11 +147,14 @@ def optimize_xgb_optuna(
     best_value = study.best_value
     best_n_estimators = study.best_trial.user_attrs["best_n_estimators"]
 
-    print(f"\n✅ Лучшие гиперпараметры: {best_params}")
-    print(f"🌳 Оптимальное число деревьев (early stopping): {best_n_estimators}")
-    print(f"📉 Лучшая метрика на валидации: {best_value:.4f}")
+    # Формируем красивую строку-сводку (без print!)
+    summary = (
+        f"Лучшие параметры (optuna): {best_params}\n"
+        f"Оптимальное число деревьев (early stopping): {best_n_estimators}\n"
+        f"Лучшая метрика на валидации: {best_value:.4f}"
+    )
 
-    return best_params, best_value, best_n_estimators
+    return best_params, best_value, best_n_estimators, summary
 
 
 def get_model():
@@ -164,35 +163,43 @@ def get_model():
 
 
 def get_param_grid():
-
-    #  Определяет сетку для GridSearch (дискретные значения)
-    #  и пространство для Random / Bayes (распределения).
-
-    # Для GridSearch используем небольшой набор дискретных значений
+    # Для GridSearch (дискретные значения, но с регуляризацией)
     grid_params = {
         "n_estimators": [50, 100, 150],
         "max_depth": [3, 5, 7],
         "learning_rate": [0.01, 0.1, 0.2],
         "subsample": [0.8, 1.0],
         "colsample_bytree": [0.8, 1.0],
+        "gamma": [0, 0.1, 0.5, 1.0],  # 🟢 Штраф за разбиение
+        "lambda": [0, 0.5, 1.0, 2.0],  # 🟢 L2 регуляризация
+        "alpha": [0, 0.1, 0.5, 1.0],  # 🟢 L1 регуляризация
+        "min_child_weight": [1, 3, 5, 7],  # 🟢 Мин. вес листа
     }
 
-    # Для RandomizedSearchCV используем более широкий дискретный набор
+    # Для RandomizedSearchCV
     random_params = {
         "n_estimators": [50, 100, 150, 200],
         "max_depth": [3, 4, 5, 6, 7, 8],
         "learning_rate": [0.01, 0.05, 0.1, 0.15, 0.2],
         "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
         "colsample_bytree": [0.6, 0.7, 0.8, 0.9, 1.0],
+        "gamma": [0, 0.1, 0.5, 1.0, 2.0],
+        "lambda": [0, 0.5, 1.0, 2.0, 5.0],
+        "alpha": [0, 0.1, 0.5, 1.0],
+        "min_child_weight": [1, 3, 5, 7, 10],
     }
 
-    # Для BayesSearchCV задаём непрерывные диапазоны
+    # Для BayesSearchCV (непрерывные/дискретные диапазоны)
     bayes_params = {
         "n_estimators": Integer(50, 200),
         "max_depth": Integer(3, 8),
         "learning_rate": Real(0.01, 0.2, prior="log-uniform"),
         "subsample": Real(0.6, 1.0),
         "colsample_bytree": Real(0.6, 1.0),
+        "gamma": Real(0.0, 2.0),
+        "lambda": Real(0.0, 5.0),
+        "alpha": Real(0.0, 1.0),
+        "min_child_weight": Integer(1, 10),
     }
 
     return grid_params, random_params, bayes_params
@@ -230,29 +237,41 @@ def main():
 
     # 3. Оптимизация через Optuna (с ранней остановкой и регуляризацией пространства)
     # Для валидации используем X_train_val, y_train_val (они возвращаются из split_data)
-    best_params, _, best_n_estimators = optimize_xgb_optuna(
-        X_train_train,
-        y_train_train,
-        X_train_val,
-        y_train_val,
-        n_trials=50,  # Для теста хватит 50, для продакшена ставьте 100-200
-    )
-
-    final_model = xgb.XGBRegressor(
-        **best_params, n_estimators=best_n_estimators, random_state=RANDOM_STATE
-    )
-    final_model.fit(X_train, y_train)  # Финальное обучение на полном трейне
-
-    # Возвращаем параметры для Grid/Random/Bayes (раскомментируем вызов!)
-    grid_params, random_params, bayes_params = get_param_grid()
-
-    # 4. Результаты будем хранить в словаре
     results = {
-        "no_cv": {"grid": {}, "random": {}, "bayes": {}},
-        "with_cv": {"grid": {}, "random": {}, "bayes": {}},
+        "no_cv": {"grid": {}, "random": {}, "bayes": {}, "optuna": {}},
+        "with_cv": {"grid": {}, "random": {}, "bayes": {}, "optuna": {}},
     }
 
+    start_optuna = time.time()
+    best_params, _, best_n_estimators, optuna_summary = optimize_xgb_optuna(
+        X_train_train, y_train_train, X_train_val, y_train_val, n_trials=50
+    )
+
+    final_model_optuna = xgb.XGBRegressor(
+        **best_params, n_estimators=best_n_estimators, random_state=RANDOM_STATE
+    )
+    final_model_optuna.fit(X_train, y_train)
+
+    rmse_optuna, mape_optuna = evaluate_model(final_model_optuna, X_test, y_test)
+    time_optuna = time.time() - start_optuna
+
+    results["no_cv"]["optuna"] = {
+        "rmse": rmse_optuna,
+        "mape": mape_optuna,
+        "time": time_optuna,
+    }
+    results["with_cv"]["optuna"] = {
+        "rmse": float("nan"),
+        "mape": float("nan"),
+        "time": float("nan"),
+    }
+
+    grid_params, random_params, bayes_params = get_param_grid()
+
     print("\n=== Режим без кросс-валидации ===")
+    print(optuna_summary)
+    print("-" * 40)
+
     # Формируем единый массив из train_train и train_val для подачи в *SearchCV,
     # и задаём пользовательский cv, который представляет собой один фиксированный сплит.
     train_indices = np.arange(len(X_train_train))
@@ -447,6 +466,7 @@ def main():
         "Сеточный поиск",
         "Случайный поиск",
         "Байесовский поиск",
+        "Optuna",
     ]
 
     # Таблица для режима без CV
@@ -456,18 +476,21 @@ def main():
             f"{results['no_cv']['grid']['rmse']:.4f}",
             f"{results['no_cv']['random']['rmse']:.4f}",
             f"{results['no_cv']['bayes']['rmse']:.4f}",
+            f"{results['no_cv']['optuna']['rmse']:.4f}",
         ],
         [
             "MAPE (%)",
             f"{results['no_cv']['grid']['mape']:.2f}",
             f"{results['no_cv']['random']['mape']:.2f}",
             f"{results['no_cv']['bayes']['mape']:.2f}",
+            f"{results['no_cv']['optuna']['mape']:.2f}",
         ],
         [
             "Время (с)",
             f"{results['no_cv']['grid']['time']:.2f}",
             f"{results['no_cv']['random']['time']:.2f}",
             f"{results['no_cv']['bayes']['time']:.2f}",
+            f"{results['no_cv']['optuna']['time']:.2f}",
         ],
     ]
     df_no_cv = pd.DataFrame(data_no_cv, columns=columns)
@@ -479,18 +502,21 @@ def main():
             f"{results['with_cv']['grid']['rmse']:.4f}",
             f"{results['with_cv']['random']['rmse']:.4f}",
             f"{results['with_cv']['bayes']['rmse']:.4f}",
+            f"{results['with_cv']['optuna']['rmse']:.4f}",
         ],
         [
             "MAPE (%)",
             f"{results['with_cv']['grid']['mape']:.2f}",
             f"{results['with_cv']['random']['mape']:.2f}",
             f"{results['with_cv']['bayes']['mape']:.2f}",
+            f"{results['with_cv']['optuna']['mape']:.2f}",
         ],
         [
             "Время (с)",
             f"{results['with_cv']['grid']['time']:.2f}",
             f"{results['with_cv']['random']['time']:.2f}",
             f"{results['with_cv']['bayes']['time']:.2f}",
+            f"{results['with_cv']['optuna']['time']:.2f}",
         ],
     ]
     df_with_cv = pd.DataFrame(data_with_cv, columns=columns)
