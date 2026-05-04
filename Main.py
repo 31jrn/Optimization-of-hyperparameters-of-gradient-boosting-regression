@@ -27,7 +27,7 @@ import xgboost as xgb
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer
 import optuna
-import logging
+import matplotlib.pyplot as plt
 
 
 def load_data(file_path, x_cols=None, y_col=None):
@@ -105,15 +105,15 @@ def _objective(trial, X_train, y_train, X_val, y_val, metric_func):
         "objective": "reg:squarederror",
         "eval_metric": "rmse",
         "random_state": 42,
-        "early_stopping_rounds": 50,  # 🟢 ПЕРЕНЕСЕНО В КОНСТРУКТОР
+        "early_stopping_rounds": 50,  # 
     }
 
     model = xgb.XGBRegressor(**params)
     model.fit(
         X_train,
         y_train,
-        eval_set=[(X_val, y_val)],  # eval_set остаётся в fit()
-        verbose=False,  # early_stopping_rounds убран отсюда
+        eval_set=[(X_val, y_val)],
+        verbose=False,
     )
 
     # XGBoost 2.x автоматически подставляет best_iteration, если ранняя остановка сработала
@@ -174,10 +174,10 @@ def get_param_grid():
         "learning_rate": [0.01, 0.1, 0.2],
         "subsample": [0.8, 1.0],
         "colsample_bytree": [0.8, 1.0],
-        "gamma": [0, 0.1, 0.5, 1.0],  # 🟢 Штраф за разбиение
-        "lambda": [0, 0.5, 1.0, 2.0],  # 🟢 L2 регуляризация
-        "alpha": [0, 0.1, 0.5, 1.0],  # 🟢 L1 регуляризация
-        "min_child_weight": [1, 3, 5, 7],  # 🟢 Мин. вес листа
+        "gamma": [0, 0.1, 0.5, 1.0],  #  Штраф за разбиение
+        "lambda": [0, 0.5, 1.0, 2.0],  #  L2 регуляризация
+        "alpha": [0, 0.1, 0.5, 1.0],  #  L1 регуляризация
+        "min_child_weight": [1, 3, 5, 7],  #  Мин. вес листа
     }
 
     # Для RandomizedSearchCV
@@ -263,7 +263,7 @@ def main():
     time_optuna = time.time() - start_optuna
     results["no_cv"]["optuna"] = {
         "rmse": rmse_optuna,
-        "mae": mae_optuna,  # 🟢 Добавили
+        "mae": mae_optuna,
         "mape": mape_optuna,
         "time": time_optuna,
     }
@@ -344,7 +344,9 @@ def main():
         **best_params_random, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_random.fit(X_train, y_train)
-    rmse_random, mae_random, mape_random = evaluate_model(final_model_random, X_test, y_test)
+    rmse_random, mae_random, mape_random = evaluate_model(
+        final_model_random, X_test, y_test
+    )
     results["no_cv"]["random"] = {
         "rmse": rmse_random,
         "mae": mae_random,
@@ -375,7 +377,9 @@ def main():
         **best_params_bayes, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_bayes.fit(X_train, y_train)
-    rmse_bayes, mae_bayes, mape_bayes = evaluate_model(final_model_bayes, X_test, y_test)
+    rmse_bayes, mae_bayes, mape_bayes = evaluate_model(
+        final_model_bayes, X_test, y_test
+    )
     results["no_cv"]["bayes"] = {
         "rmse": rmse_bayes,
         "mae": mae_bayes,
@@ -407,7 +411,9 @@ def main():
         **best_params_grid_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_grid_cv.fit(X_train, y_train)
-    rmse_grid_cv, mae_grid_cv, mape_grid_cv = evaluate_model(final_model_grid_cv, X_test, y_test)
+    rmse_grid_cv, mae_grid_cv, mape_grid_cv = evaluate_model(
+        final_model_grid_cv, X_test, y_test
+    )
     results["with_cv"]["grid"] = {
         "rmse": rmse_grid_cv,
         "mae": mae_grid_cv,
@@ -438,7 +444,7 @@ def main():
         **best_params_random_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_random_cv.fit(X_train, y_train)
-    rmse_random_cv,mae_random_cv, mape_random_cv = evaluate_model(
+    rmse_random_cv, mae_random_cv, mape_random_cv = evaluate_model(
         final_model_random_cv, X_test, y_test
     )
     results["with_cv"]["random"] = {
@@ -471,7 +477,9 @@ def main():
         **best_params_bayes_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_bayes_cv.fit(X_train, y_train)
-    rmse_bayes_cv,mae_bayes_cv, mape_bayes_cv = evaluate_model(final_model_bayes_cv, X_test, y_test)
+    rmse_bayes_cv, mae_bayes_cv, mape_bayes_cv = evaluate_model(
+        final_model_bayes_cv, X_test, y_test
+    )
     results["with_cv"]["bayes"] = {
         "rmse": rmse_bayes_cv,
         "mae": mae_bayes_cv,
@@ -487,28 +495,71 @@ def main():
         "Optuna",
     ]
 
+    # 1. Получаем важность признаков (используем gain)
+    importances = final_model_optuna.get_booster().get_score(importance_type="gain")
+
+    # 2. Готовим DataFrame
+    # Если у вас нет имен столбцов в X_train, замените X_train.columns на [f'x{i+1}' for i in range(X.shape[1])]
+    feat_names = (
+        X_train.columns
+        if hasattr(X_train, "columns")
+        else [f"x{i + 1}" for i in range(X_train.shape[1])]
+    )
+    feat_imp = pd.DataFrame(
+        {
+            "feature": feat_names,
+            "importance": [
+                importances.get(f"f{i}", 0.0) for i in range(len(feat_names))
+            ],
+        }
+    )
+    feat_imp = feat_imp.sort_values("importance", ascending=False)
+
+    # 3. Строим график
+    plt.figure(figsize=(8, 6))
+    plt.barh(
+        feat_imp["feature"][::-1],
+        feat_imp["importance"][::-1],
+        color="steelblue",
+        edgecolor="black",
+    )
+    plt.xlabel("Важность (Gain)")
+    plt.title("Важность признаков (модель Optuna)")
+    plt.grid(axis="x", linestyle="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig("feature_importance_optuna.png", dpi=300)  # Сохраняем в файл
+    plt.show()
+
     # Таблица для режима без CV
     data_no_cv = [
-        ["RMSE", 
-         f"{results['no_cv']['grid']['rmse']:.4f}", 
-         f"{results['no_cv']['random']['rmse']:.4f}", 
-         f"{results['no_cv']['bayes']['rmse']:.4f}", 
-         f"{results['no_cv']['optuna']['rmse']:.4f}"],
-        ["MAE",  
-         f"{results['no_cv']['grid']['mae']:.4f}", 
-         f"{results['no_cv']['random']['mae']:.4f}", 
-         f"{results['no_cv']['bayes']['mae']:.4f}", 
-         f"{results['no_cv']['optuna']['mae']:.4f}"],
-        ["MAPE (%)", 
-         f"{results['no_cv']['grid']['mape']:.2f}", 
-         f"{results['no_cv']['random']['mape']:.2f}", 
-         f"{results['no_cv']['bayes']['mape']:.2f}", 
-         f"{results['no_cv']['optuna']['mape']:.2f}"],
-        ["Время (с)", 
-         f"{results['no_cv']['grid']['time']:.2f}", 
-         f"{results['no_cv']['random']['time']:.2f}", 
-         f"{results['no_cv']['bayes']['time']:.2f}", 
-         f"{results['no_cv']['optuna']['time']:.2f}"],
+        [
+            "RMSE",
+            f"{results['no_cv']['grid']['rmse']:.4f}",
+            f"{results['no_cv']['random']['rmse']:.4f}",
+            f"{results['no_cv']['bayes']['rmse']:.4f}",
+            f"{results['no_cv']['optuna']['rmse']:.4f}",
+        ],
+        [
+            "MAE",
+            f"{results['no_cv']['grid']['mae']:.4f}",
+            f"{results['no_cv']['random']['mae']:.4f}",
+            f"{results['no_cv']['bayes']['mae']:.4f}",
+            f"{results['no_cv']['optuna']['mae']:.4f}",
+        ],
+        [
+            "MAPE (%)",
+            f"{results['no_cv']['grid']['mape']:.2f}",
+            f"{results['no_cv']['random']['mape']:.2f}",
+            f"{results['no_cv']['bayes']['mape']:.2f}",
+            f"{results['no_cv']['optuna']['mape']:.2f}",
+        ],
+        [
+            "Время (с)",
+            f"{results['no_cv']['grid']['time']:.2f}",
+            f"{results['no_cv']['random']['time']:.2f}",
+            f"{results['no_cv']['bayes']['time']:.2f}",
+            f"{results['no_cv']['optuna']['time']:.2f}",
+        ],
     ]
     df_no_cv = pd.DataFrame(data_no_cv, columns=columns)
 
@@ -549,6 +600,68 @@ def main():
     print("РЕЗУЛЬТАТЫ БЕЗ КРОСС-ВАЛИДАЦИИ")
     print("=" * 60)
     print(df_no_cv.to_string(index=False))
+    # 1. Подготовка данных для графика (режим без CV)
+    methods = ["Grid", "Random", "Bayes", "Optuna"]
+    metrics = ["RMSE", "MAE", "MAPE (%)"]
+
+    # Извлекаем данные из results (для режима no_cv)
+    data_to_plot = {
+        "RMSE": [
+            results["no_cv"][m]["rmse"] for m in ["grid", "random", "bayes", "optuna"]
+        ],
+        "MAE": [
+            results["no_cv"][m]["mae"] for m in ["grid", "random", "bayes", "optuna"]
+        ],
+        "MAPE (%)": [
+            results["no_cv"][m]["mape"] for m in ["grid", "random", "bayes", "optuna"]
+        ],
+    }
+
+    # 2. Настройки группировки
+    x = np.arange(len(methods))  # позиции для методов
+    width = 0.25  # ширина столбца
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # 3. Отрисовка столбцов для каждой метрики
+    bars1 = ax.bar(
+        x - width, data_to_plot["RMSE"], width, label="RMSE", edgecolor="black"
+    )
+    bars2 = ax.bar(x, data_to_plot["MAE"], width, label="MAE", edgecolor="black")
+    bars3 = ax.bar(
+        x + width, data_to_plot["MAPE (%)"], width, label="MAPE (%)", edgecolor="black"
+    )
+
+    # 4. Оформление
+    ax.set_xlabel("Метод оптимизации")
+    ax.set_ylabel("Значение метрики")
+    ax.set_title("Сравнение методов оптимизации (режим без кросс-валидации)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(methods)
+    ax.legend()
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    # Добавляем подписи значений на столбцы (опционально)
+    def autolabel(bars):
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(
+                f"{height:.2f}",
+                xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    autolabel(bars1)
+    autolabel(bars2)
+    autolabel(bars3)
+
+    plt.tight_layout()
+    plt.savefig("methods_comparison_no_cv.png", dpi=300)
+    plt.show()
 
     print("\n" + "=" * 60)
     print("РЕЗУЛЬТАТЫ С КРОСС-ВАЛИДАЦИЕЙ (5-FOLD)")
