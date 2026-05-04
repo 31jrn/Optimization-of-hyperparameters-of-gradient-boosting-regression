@@ -105,7 +105,7 @@ def _objective(trial, X_train, y_train, X_val, y_val, metric_func):
         "objective": "reg:squarederror",
         "eval_metric": "rmse",
         "random_state": 42,
-        "early_stopping_rounds": 50,  # 
+        "early_stopping_rounds": 100,  # 
     }
 
     model = xgb.XGBRegressor(**params)
@@ -150,7 +150,7 @@ def optimize_xgb_optuna(
     best_params = study.best_params
     best_value = study.best_value
     best_n_estimators = study.best_trial.user_attrs["best_n_estimators"]
-
+    best_n_estimators = max(best_n_estimators, 50)
     # Формируем красивую строку-сводку (без print!)
     summary = (
         f"Лучшие параметры (optuna): {best_params}\n"
@@ -169,13 +169,13 @@ def get_model():
 def get_param_grid():
     # Для GridSearch (дискретные значения, но с регуляризацией)
     grid_params = {
-        "n_estimators": [50, 100, 150],
-        "max_depth": [3, 5, 7],
-        "learning_rate": [0.01, 0.1, 0.2],
+        "n_estimators": [50, 100],
+        "max_depth": [4,6],
+        "learning_rate": [0.01, 0.1],
         "subsample": [0.8, 1.0],
         "colsample_bytree": [0.8, 1.0],
-        "gamma": [0, 0.1, 0.5, 1.0],  #  Штраф за разбиение
-        "lambda": [0, 0.5, 1.0, 2.0],  #  L2 регуляризация
+        "gamma": [0.1, 0.5],  #  Штраф за разбиение
+        "lambda": [0.5, 1.0],  #  L2 регуляризация
         "alpha": [0, 0.1, 0.5, 1.0],  #  L1 регуляризация
         "min_child_weight": [1, 3, 5, 7],  #  Мин. вес листа
     }
