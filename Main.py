@@ -18,7 +18,11 @@ from sklearn.model_selection import (
     RandomizedSearchCV,
     KFold,
 )
-from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
+from sklearn.metrics import (
+    mean_squared_error,
+    mean_absolute_percentage_error,
+    mean_absolute_error,
+)
 import xgboost as xgb
 from skopt import BayesSearchCV
 from skopt.space import Real, Integer
@@ -206,11 +210,12 @@ def get_param_grid():
 
 
 def evaluate_model(model, X_test, y_test):
-    """Возвращает RMSE и MAPE на тестовых данных."""
+    """Возвращает RMSE, MAE и MAPE на тестовых данных."""
     y_pred = model.predict(X_test)
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    mape = mean_absolute_percentage_error(y_test, y_pred) * 100  # в процентах
-    return rmse, mape
+    mae = mean_absolute_error(y_test, y_pred)  #  Новая метрика
+    mape = mean_absolute_percentage_error(y_test, y_pred) * 100
+    return rmse, mae, mape  #  Возвращаем 3 значения
 
 
 def main():
@@ -252,16 +257,20 @@ def main():
     )
     final_model_optuna.fit(X_train, y_train)
 
-    rmse_optuna, mape_optuna = evaluate_model(final_model_optuna, X_test, y_test)
+    rmse_optuna, mae_optuna, mape_optuna = evaluate_model(
+        final_model_optuna, X_test, y_test
+    )
     time_optuna = time.time() - start_optuna
-
     results["no_cv"]["optuna"] = {
         "rmse": rmse_optuna,
+        "mae": mae_optuna,  # 🟢 Добавили
         "mape": mape_optuna,
         "time": time_optuna,
     }
+
     results["with_cv"]["optuna"] = {
         "rmse": float("nan"),
+        "mae": float("nan"),
         "mape": float("nan"),
         "time": float("nan"),
     }
@@ -305,9 +314,13 @@ def main():
         **best_params_grid, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_grid.fit(X_train, y_train)
-    rmse_grid, mape_grid = evaluate_model(final_model_grid, X_test, y_test)
-    results["no_cv"]["grid"] = {"rmse": rmse_grid, "mape": mape_grid, "time": time_grid}
-
+    rmse_grid, mae_grid, mape_grid = evaluate_model(final_model_grid, X_test, y_test)
+    results["no_cv"]["grid"] = {
+        "rmse": rmse_grid,
+        "mae": mae_grid,
+        "mape": mape_grid,
+        "time": time_grid,
+    }
     # Случайный поиск (без CV)
     print("Случайный поиск (без CV)...")
     start = time.time()
@@ -331,9 +344,10 @@ def main():
         **best_params_random, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_random.fit(X_train, y_train)
-    rmse_random, mape_random = evaluate_model(final_model_random, X_test, y_test)
+    rmse_random, mae_random, mape_random = evaluate_model(final_model_random, X_test, y_test)
     results["no_cv"]["random"] = {
         "rmse": rmse_random,
+        "mae": mae_random,
         "mape": mape_random,
         "time": time_random,
     }
@@ -361,9 +375,10 @@ def main():
         **best_params_bayes, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_bayes.fit(X_train, y_train)
-    rmse_bayes, mape_bayes = evaluate_model(final_model_bayes, X_test, y_test)
+    rmse_bayes, mae_bayes, mape_bayes = evaluate_model(final_model_bayes, X_test, y_test)
     results["no_cv"]["bayes"] = {
         "rmse": rmse_bayes,
+        "mae": mae_bayes,
         "mape": mape_bayes,
         "time": time_bayes,
     }
@@ -392,9 +407,10 @@ def main():
         **best_params_grid_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_grid_cv.fit(X_train, y_train)
-    rmse_grid_cv, mape_grid_cv = evaluate_model(final_model_grid_cv, X_test, y_test)
+    rmse_grid_cv, mae_grid_cv, mape_grid_cv = evaluate_model(final_model_grid_cv, X_test, y_test)
     results["with_cv"]["grid"] = {
         "rmse": rmse_grid_cv,
+        "mae": mae_grid_cv,
         "mape": mape_grid_cv,
         "time": time_grid_cv,
     }
@@ -422,11 +438,12 @@ def main():
         **best_params_random_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_random_cv.fit(X_train, y_train)
-    rmse_random_cv, mape_random_cv = evaluate_model(
+    rmse_random_cv,mae_random_cv, mape_random_cv = evaluate_model(
         final_model_random_cv, X_test, y_test
     )
     results["with_cv"]["random"] = {
         "rmse": rmse_random_cv,
+        "mae": mae_random_cv,
         "mape": mape_random_cv,
         "time": time_random_cv,
     }
@@ -454,9 +471,10 @@ def main():
         **best_params_bayes_cv, objective="reg:squarederror", random_state=RANDOM_STATE
     )
     final_model_bayes_cv.fit(X_train, y_train)
-    rmse_bayes_cv, mape_bayes_cv = evaluate_model(final_model_bayes_cv, X_test, y_test)
+    rmse_bayes_cv,mae_bayes_cv, mape_bayes_cv = evaluate_model(final_model_bayes_cv, X_test, y_test)
     results["with_cv"]["bayes"] = {
         "rmse": rmse_bayes_cv,
+        "mae": mae_bayes_cv,
         "mape": mape_bayes_cv,
         "time": time_bayes_cv,
     }
@@ -471,27 +489,26 @@ def main():
 
     # Таблица для режима без CV
     data_no_cv = [
-        [
-            "RMSE",
-            f"{results['no_cv']['grid']['rmse']:.4f}",
-            f"{results['no_cv']['random']['rmse']:.4f}",
-            f"{results['no_cv']['bayes']['rmse']:.4f}",
-            f"{results['no_cv']['optuna']['rmse']:.4f}",
-        ],
-        [
-            "MAPE (%)",
-            f"{results['no_cv']['grid']['mape']:.2f}",
-            f"{results['no_cv']['random']['mape']:.2f}",
-            f"{results['no_cv']['bayes']['mape']:.2f}",
-            f"{results['no_cv']['optuna']['mape']:.2f}",
-        ],
-        [
-            "Время (с)",
-            f"{results['no_cv']['grid']['time']:.2f}",
-            f"{results['no_cv']['random']['time']:.2f}",
-            f"{results['no_cv']['bayes']['time']:.2f}",
-            f"{results['no_cv']['optuna']['time']:.2f}",
-        ],
+        ["RMSE", 
+         f"{results['no_cv']['grid']['rmse']:.4f}", 
+         f"{results['no_cv']['random']['rmse']:.4f}", 
+         f"{results['no_cv']['bayes']['rmse']:.4f}", 
+         f"{results['no_cv']['optuna']['rmse']:.4f}"],
+        ["MAE",  
+         f"{results['no_cv']['grid']['mae']:.4f}", 
+         f"{results['no_cv']['random']['mae']:.4f}", 
+         f"{results['no_cv']['bayes']['mae']:.4f}", 
+         f"{results['no_cv']['optuna']['mae']:.4f}"],
+        ["MAPE (%)", 
+         f"{results['no_cv']['grid']['mape']:.2f}", 
+         f"{results['no_cv']['random']['mape']:.2f}", 
+         f"{results['no_cv']['bayes']['mape']:.2f}", 
+         f"{results['no_cv']['optuna']['mape']:.2f}"],
+        ["Время (с)", 
+         f"{results['no_cv']['grid']['time']:.2f}", 
+         f"{results['no_cv']['random']['time']:.2f}", 
+         f"{results['no_cv']['bayes']['time']:.2f}", 
+         f"{results['no_cv']['optuna']['time']:.2f}"],
     ]
     df_no_cv = pd.DataFrame(data_no_cv, columns=columns)
 
@@ -503,6 +520,13 @@ def main():
             f"{results['with_cv']['random']['rmse']:.4f}",
             f"{results['with_cv']['bayes']['rmse']:.4f}",
             f"{results['with_cv']['optuna']['rmse']:.4f}",
+        ],
+        [
+            "MAE",
+            f"{results['with_cv']['grid']['mae']:.4f}",
+            f"{results['with_cv']['random']['mae']:.4f}",
+            f"{results['with_cv']['bayes']['mae']:.4f}",
+            f"{results['with_cv']['optuna']['mae']:.4f}",
         ],
         [
             "MAPE (%)",
