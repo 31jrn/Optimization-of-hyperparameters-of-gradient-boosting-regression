@@ -105,7 +105,7 @@ def _objective(trial, X_train, y_train, X_val, y_val, metric_func):
         "objective": "reg:squarederror",
         "eval_metric": "rmse",
         "random_state": 42,
-        "early_stopping_rounds": 100,  # 
+        "early_stopping_rounds": 100,  #
     }
 
     model = xgb.XGBRegressor(**params)
@@ -170,7 +170,7 @@ def get_param_grid():
     # Для GridSearch (дискретные значения, но с регуляризацией)
     grid_params = {
         "n_estimators": [50, 100],
-        "max_depth": [4,6],
+        "max_depth": [4, 6],
         "learning_rate": [0.01, 0.1],
         "subsample": [0.8, 1.0],
         "colsample_bytree": [0.8, 1.0],
@@ -207,6 +207,68 @@ def get_param_grid():
     }
 
     return grid_params, random_params, bayes_params
+
+
+def plot_methods_comparison(
+    results, mode, methods, title, filename, include_optuna=False
+):
+    """
+    Строит сравнительный график по RMSE, MAE и MAPE
+    для заданного режима: 'no_cv' или 'with_cv'.
+    """
+    mode_results = results[mode]
+
+    # Формируем список методов
+    method_keys = [m.lower() for m in methods]
+
+    # Собираем данные по метрикам
+    data_to_plot = {
+        "RMSE": [mode_results[m]["rmse"] for m in method_keys],
+        "MAE": [mode_results[m]["mae"] for m in method_keys],
+        "MAPE (%)": [mode_results[m]["mape"] for m in method_keys],
+    }
+
+    x = np.arange(len(methods))
+    width = 0.25
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    bars1 = ax.bar(
+        x - width, data_to_plot["RMSE"], width, label="RMSE", edgecolor="black"
+    )
+    bars2 = ax.bar(x, data_to_plot["MAE"], width, label="MAE", edgecolor="black")
+    bars3 = ax.bar(
+        x + width, data_to_plot["MAPE (%)"], width, label="MAPE (%)", edgecolor="black"
+    )
+
+    ax.set_xlabel("Метод оптимизации")
+    ax.set_ylabel("Значение метрики")
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(methods)
+    ax.legend()
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    def autolabel(bars):
+        for bar in bars:
+            height = bar.get_height()
+            ax.annotate(
+                f"{height:.2f}",
+                xy=(bar.get_x() + bar.get_width() / 2, height),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    autolabel(bars1)
+    autolabel(bars2)
+    autolabel(bars3)
+
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300)
+    plt.show()
 
 
 def evaluate_model(model, X_test, y_test):
@@ -600,68 +662,21 @@ def main():
     print("РЕЗУЛЬТАТЫ БЕЗ КРОСС-ВАЛИДАЦИИ")
     print("=" * 60)
     print(df_no_cv.to_string(index=False))
-    # 1. Подготовка данных для графика (режим без CV)
-    methods = ["Grid", "Random", "Bayes", "Optuna"]
-    metrics = ["RMSE", "MAE", "MAPE (%)"]
 
-    # Извлекаем данные из results (для режима no_cv)
-    data_to_plot = {
-        "RMSE": [
-            results["no_cv"][m]["rmse"] for m in ["grid", "random", "bayes", "optuna"]
-        ],
-        "MAE": [
-            results["no_cv"][m]["mae"] for m in ["grid", "random", "bayes", "optuna"]
-        ],
-        "MAPE (%)": [
-            results["no_cv"][m]["mape"] for m in ["grid", "random", "bayes", "optuna"]
-        ],
-    }
-
-    # 2. Настройки группировки
-    x = np.arange(len(methods))  # позиции для методов
-    width = 0.25  # ширина столбца
-
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # 3. Отрисовка столбцов для каждой метрики
-    bars1 = ax.bar(
-        x - width, data_to_plot["RMSE"], width, label="RMSE", edgecolor="black"
+    plot_methods_comparison(
+        results=results,
+        mode="no_cv",
+        methods=["Grid", "Random", "Bayes", "Optuna"],
+        title="Сравнение методов оптимизации (режим без кросс-валидации)",
+        filename="methods_comparison_no_cv.png",
     )
-    bars2 = ax.bar(x, data_to_plot["MAE"], width, label="MAE", edgecolor="black")
-    bars3 = ax.bar(
-        x + width, data_to_plot["MAPE (%)"], width, label="MAPE (%)", edgecolor="black"
+    plot_methods_comparison(
+        results=results,
+        mode="with_cv",
+        methods=["Grid", "Random", "Bayes"],
+        title="Сравнение методов оптимизации (режим с кросс-валидацией)",
+        filename="methods_comparison_with_cv.png",
     )
-
-    # 4. Оформление
-    ax.set_xlabel("Метод оптимизации")
-    ax.set_ylabel("Значение метрики")
-    ax.set_title("Сравнение методов оптимизации (режим без кросс-валидации)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(methods)
-    ax.legend()
-    ax.grid(axis="y", linestyle="--", alpha=0.3)
-
-    # Добавляем подписи значений на столбцы (опционально)
-    def autolabel(bars):
-        for bar in bars:
-            height = bar.get_height()
-            ax.annotate(
-                f"{height:.2f}",
-                xy=(bar.get_x() + bar.get_width() / 2, height),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=8,
-            )
-
-    autolabel(bars1)
-    autolabel(bars2)
-    autolabel(bars3)
-
-    plt.tight_layout()
-    plt.savefig("methods_comparison_no_cv.png", dpi=300)
-    plt.show()
 
     print("\n" + "=" * 60)
     print("РЕЗУЛЬТАТЫ С КРОСС-ВАЛИДАЦИЕЙ (5-FOLD)")
